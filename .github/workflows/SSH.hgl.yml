@@ -1,13 +1,13 @@
 #修改TNAME: K2P-5.0 中的K2P-5.0为你需要编译的型号，注意名称要与configs/templates/目录下的名字相同
-name: C.RM2100
+name: ghl SSH build
 
 on:
   workflow_dispatch:
     inputs:
       name:
-        description: "Build Padavan"
+        description: "SSH connection"
         required: true
-        default: "build"
+        default: "GO"
   # release:
   #   types: [published]
   push:
@@ -22,7 +22,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
@@ -43,37 +43,28 @@ jobs:
           cd /opt/rt-n56u/toolchain-mipsel
           sh dl_toolchain.sh
           mkdir -p /opt/images/
-      - name: Recovery SSP bin files download from remote
+      - name: Clone source code adg
         run: |
-          #cp -f ssp/Makefile /opt/rt-n56u/trunk/user/shadowsocks
-          #cp -f ssp/shadowsocks.sh /opt/rt-n56u/trunk/user/shadowsocks/scripts
-          #cp -f ssp/defaults.c /opt/rt-n56u/trunk/user/shared
-          #cp -f ssp/variables.c /opt/rt-n56u//trunk/user/httpd
-          #cp -f ssp/Shadowsocks.asp /opt/rt-n56u/trunk/user/www/n56u_ribbon_fixed
-          #cd /opt/rt-n56u/trunk/user/shared
-          #sed -i "s#https://cdn.jsdelivr.net/gh/Padavan_CI/ssp/trojan#https://cdn.jsdelivr.net/gh/Yh793/Padavan-build/ssp/trojan#g" ./defaults.c
-          #sed -i "s#https://cdn.jsdelivr.net/gh/Padavan_CI/ssp/v2ray#https://cdn.jsdelivr.net/gh/Yh793/Padavan-build/ssp/v2ray#g" ./defaults.c
-          cd /opt/rt-n56u/trunk/user/adguardhome
-          sed -i "s#https://cdn.jsdelivr.net/gh/chongshengB/rt-n56u/trunk/user/adguardhome/AdGuardHome#https://cdn.jsdelivr.net/gh/Yh793/Padavan-build/adg/AdGuardHome#g" ./adguardhome.sh
-      - name: Get current time
-        uses: 1466587594/get-current-time@v2
-        id: current-time
+          git clone --branch "v0.104.0" --depth=1 "https://github.com/AdguardTeam/AdGuardHome" /opt/adguard
+      - name: Setup Node.js
+        uses: actions/setup-node@v1
         with:
-          format: YY.MMDDHH
-          utcOffset: "+08:00"
-      #- name: Run Golang check
-      #  run: sh ./scripts/go.sh
-      #- name: SSH connection to Actions
-      #  uses: P3TERX/ssh2actions@v1.0.0
+          node-version: '12'
 
+
+      - name: Update UPX
+        run: |
+          mkdir -p /opt/upx
+          cd /opt/upx
+          wget https://github.com/upx/upx/releases/download/v3.93/upx-3.93-amd64_linux.tar.xz
+          tar -Jxf upx*.tar.xz
+          sudo cp upx*/upx /usr/bin
       - name: Build Firmware
         env:
-          TNAME: RM2100 #PSG1218 K2P-5.0 K2P K2P_nano K2P_nano-5.0 PSG1208 PSG1218_nano
+          TNAME: GHL #PSG1218 K2P-5.0 K2P K2P_nano K2P_nano-5.0 PSG1208 PSG1218_nano
         run: |
+          cp -f GHL.config /opt/rt-n56u/trunk/configs/templates/$TNAME.config
           cd /opt/rt-n56u/trunk
-          sed -i 's/192.168.2.1"/192.168.9.1"/' user/shared/defaults.h
-          sed -i 's/192.168.2.100/192.168.9.50/' user/shared/defaults.h
-          sed -i 's/192.168.2.244/192.168.9.100/' user/shared/defaults.h
           if [ ! -f configs/templates/$TNAME.config ] ; then
           echo "configs/templates/$TNAME.config not found "
           exit 1
@@ -115,7 +106,7 @@ jobs:
           echo "CONFIG_FIRMWARE_INCLUDE_SOFTETHERVPN_SERVER=n" >> .config #SOFTETHERVPN
           echo "CONFIG_FIRMWARE_INCLUDE_SOFTETHERVPN_CLIENT=n" >> .config #SOFTETHERVPN
           echo "CONFIG_FIRMWARE_INCLUDE_SOFTETHERVPN_CMD=n" >> .config #SOFTETHERVPN
-          echo "CONFIG_FIRMWARE_INCLUDE_SFE=y" >> .config #集成SFE加速
+          echo "CONFIG_FIRMWARE_INCLUDE_SFE=n" >> .config #集成SFE加速
           #
           echo "CONFIG_FIRMWARE_INCLUDE_SHADOWSOCKS=n" >> .config #SS plus+
           echo "CONFIG_FIRMWARE_INCLUDE_V2RAY=n" >> .config #集成v2ray执行文件（3.8M左右)，如果不集成，会从网上下载下来执行，不影响正常使用
@@ -163,54 +154,12 @@ jobs:
           #echo "自定义项=y" >> .config
           #########################################################################################
           sudo ./clear_tree
-          sudo ./build_firmware_modify $TNAME 0
-          sudo mv -f images/*.trx /opt/images/${TNAME}_ChongshengB_${{ steps.current-time.outputs.formattedTime }}.trx
-          echo "FNAME=$TNAME" >> $GITHUB_ENV
-      - name: Organize files
-        id: organize
-        run: |
-          echo "###########################"
-          echo "###########################"
-          echo "###########################"
-          echo "::set-output name=status::success"
-      - name: Upload packages - push to artifact file
-        uses: actions/upload-artifact@main
-        if: steps.organize.outputs.status == 'success'
-        with:
-          name: Padavan-packages
-          path: /opt/images
-      #上传到WeTransfer
-      - name: Upload firmware to WeTransfer
-        id: wetransfer
-        if: steps.organize.outputs.status == 'success'
-        run: |
-          curl -fsSL git.io/file-transfer | sh
-          ./transfer wet  -s -p 16 --no-progress /opt/images/*.trx 2>&1 | tee wetransfer.log
-          echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-          echo "DOWNLOADURL2=$(cat wetransfer.log | grep -o -E "https?://[a-zA-Z0-9\.\/_&=@$%?~#-]*")" >> $GITHUB_ENV
-          echo "::set-output name=status::success"
-      #上传到奶牛快传
-      - name: Upload firmware to cowtransfer
-        id: cowtransfer
-        if: steps.wetransfer.outputs.status == 'success'
-        run: |
-          curl -sL https://git.io/cowtransfer | sh
-          ./cowtransfer-uploader -s -p 16 --hash /opt/images/*.trx 2>&1 | tee cowtransfer.log
-          echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
-          echo "DOWNLOADURL=$(cat cowtransfer.log | grep -o -E "https?://[a-zA-Z0-9\.\/_&=@$%?~#-]*")" >> $GITHUB_ENV
-          echo "::set-output name=status::success"
-      - name: Update README.md
-        if: steps.cowtransfer.outputs.status == 'success'
-        run: |
-          git pull origin master
-          sed "42c * 当前最新版本:${FNAME}.${{ steps.current-time.outputs.formattedTime }}.trx  最后编译时间: $(date -u -d '+8 hour' '+%Y-%m-%d %H:%M:%S')  下载地址: [奶牛快传](${DOWNLOADURL})  [WeTransfer](${DOWNLOADURL2})" README.md -i
-          git config user.name  Robot
-          git config user.email github-actions@github.com
-          git commit -m "update README.md" -a
-          git push
+
+      - name: SSH connection to Actions
+        uses: P3TERX/ssh2actions@v1.0.0
+
       - name: Remove obsolete firmwares on artifacts
         uses: c-hive/gha-remove-artifacts@v1.2.0
         if: always()
         with:
           age: '3 day'
-          skip-recent: 5
